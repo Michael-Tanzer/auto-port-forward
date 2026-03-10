@@ -1,7 +1,6 @@
 import os
 import logging
 import select
-import socket
 import socketserver
 import threading
 
@@ -95,6 +94,7 @@ class SSHTunnel:
             password=self.ssh_password,
         )
         transport = self._client.get_transport()
+        transport.set_keepalive(30)
 
         # Build a handler subclass bound to this tunnel's SSH transport
         class Handler(_ForwardHandler):
@@ -127,7 +127,10 @@ class TunnelManager:
     def __init__(self):
         self._tunnels: dict[str, SSHTunnel] = {}
         self._errors: dict[str, str] = {}
+        self._desired_running: dict[str, tuple[dict, dict]] = {}
         self._lock = threading.Lock()
+        self._monitor_stop: threading.Event | None = None
+        self._monitor_thread: threading.Thread | None = None
 
     def start_tunnel(self, name: str, ssh_config: dict, tunnel_config: dict) -> str:
         with self._lock:
@@ -152,6 +155,7 @@ class TunnelManager:
                 tunnel.start()
                 self._tunnels[name] = tunnel
                 self._errors.pop(name, None)
+                self._desired_running[name] = (ssh_config, tunnel_config)
                 log.info(
                     "Tunnel '%s' started: localhost:%d -> %s:%d",
                     name,
@@ -167,6 +171,7 @@ class TunnelManager:
 
     def stop_tunnel(self, name: str) -> None:
         with self._lock:
+            self._desired_running.pop(name, None)
             self._stop_unlocked(name)
 
     def _stop_unlocked(self, name: str) -> None:
@@ -181,6 +186,7 @@ class TunnelManager:
 
     def stop_all(self) -> None:
         with self._lock:
+            self._desired_running.clear()
             for name in list(self._tunnels):
                 self._stop_unlocked(name)
 
@@ -197,3 +203,97 @@ class TunnelManager:
             except Exception:
                 pass
             return "disconnected"
+
+    def start_monitor(self, check_interval: int = 30):
+        self._monitor_stop = threading.Event()
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop,
+            args=(check_interval,),
+            daemon=True,
+        )
+        self._monitor_thread.start()
+        log.info("Tunnel health monitor started (interval=%ds)", check_interval)
+
+    def stop_monitor(self):
+        if self._monitor_stop:
+            self._monitor_stop.set()
+
+    def _monitor_loop(self, check_interval: int):
+        backoff_base = 5
+        backoff_max = 300
+        retry_counts: dict[str, int] = {}
+
+        while not self._monitor_stop.wait(check_interval):
+            with self._lock:
+                desired = dict(self._desired_running)
+
+            for name, (ssh_config, tunnel_config) in desired.items():
+                if self._monitor_stop.is_set():
+                    return
+
+                with self._lock:
+                    tunnel = self._tunnels.get(name)
+                    try:
+                        is_healthy = tunnel is not None and tunnel.is_active
+                    except Exception:
+                        is_healthy = False
+
+                if is_healthy:
+                    retry_counts.pop(name, None)
+                    continue
+
+                failures = retry_counts.get(name, 0)
+                backoff = min(backoff_base * (2 ** failures), backoff_max)
+                log.info(
+                    "Tunnel '%s' is down, attempting reconnect (attempt %d, backoff %ds)",
+                    name, failures + 1, backoff,
+                )
+
+                # Clean up dead tunnel
+                with self._lock:
+                    old = self._tunnels.pop(name, None)
+                if old:
+                    try:
+                        old.stop()
+                    except Exception:
+                        pass
+
+                # Attempt reconnect
+                try:
+                    with self._lock:
+                        if name not in self._desired_running:
+                            continue
+
+                    key_file = ssh_config.get("key_file", "")
+                    if key_file:
+                        key_file = os.path.expanduser(key_file)
+
+                    new_tunnel = SSHTunnel(
+                        ssh_host=ssh_config["host"],
+                        ssh_port=ssh_config.get("port", 22),
+                        ssh_username=ssh_config.get("username"),
+                        remote_host=tunnel_config.get("remote_host", "localhost"),
+                        remote_port=tunnel_config["remote_port"],
+                        local_port=tunnel_config["local_port"],
+                        ssh_key_file=key_file or None,
+                        ssh_password=ssh_config.get("password") or None,
+                    )
+                    new_tunnel.start()
+
+                    with self._lock:
+                        self._tunnels[name] = new_tunnel
+                        self._errors.pop(name, None)
+
+                    retry_counts.pop(name, None)
+                    log.info("Tunnel '%s' reconnected successfully", name)
+
+                except Exception as e:
+                    retry_counts[name] = failures + 1
+                    with self._lock:
+                        self._errors[name] = str(e)
+                    log.warning(
+                        "Tunnel '%s' reconnect failed: %s (next retry in ~%ds)",
+                        name, e, backoff,
+                    )
+                    if self._monitor_stop.wait(backoff):
+                        return

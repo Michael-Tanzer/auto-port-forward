@@ -59,6 +59,7 @@ def main():
     flask_thread.start()
 
     auto_start_tunnels(manager)
+    manager.start_monitor()
 
     url = f"http://127.0.0.1:{web_port}"
 
@@ -66,6 +67,7 @@ def main():
         webbrowser.open(url)
 
     def quit_app(icon, item):
+        manager.stop_monitor()
         manager.stop_all()
         icon.stop()
 
@@ -80,6 +82,7 @@ def main():
     )
     def shutdown(signum, frame):
         log.info("Caught signal %s, shutting down…", signum)
+        manager.stop_monitor()
         manager.stop_all()
         icon.stop()
 
