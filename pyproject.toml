@@ -1,0 +1,13 @@
+[project]
+name = "auto-port-forward"
+version = "0.1.0"
+description = "Auto SSH port forwarding with tray icon and web UI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "flask",
+    "pystray",
+    "Pillow",
+    "paramiko",
+    "tomlkit",
+]

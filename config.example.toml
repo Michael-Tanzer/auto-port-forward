@@ -1,0 +1,19 @@
+[settings]
+web_port = 9876
+
+# SSH connections — add one section per host:
+# [ssh.myserver]
+# host = "myserver.example.com"
+# port = 22
+# username = "user"
+# key_file = "~/.ssh/id_rsa"
+# password = ""
+
+# Tunnels — add one [[tunnels]] block per forward:
+# [[tunnels]]
+# name = "Database"
+# ssh = "myserver"
+# remote_host = "localhost"
+# remote_port = 5432
+# local_port = 5432
+# enabled = true
