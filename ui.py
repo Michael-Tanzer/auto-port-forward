@@ -20,9 +20,6 @@ HTML_PAGE = """\
 
   /* Header */
   header { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
-  .logo { display: flex; gap: 4px; background: var(--card); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--card-border); }
-  .logo-bar { width: 4px; height: 16px; background: var(--green); border-radius: 2px; }
-  .logo-bar:last-child { height: 12px; margin-top: 4px; }
   header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
 
   /* Sections */
@@ -101,7 +98,7 @@ HTML_PAGE = """\
 <body>
 
 <header>
-  <div class="logo"><div class="logo-bar"></div><div class="logo-bar"></div></div>
+  <svg width="28" height="28" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1a1a1a"/><rect x="14" y="16" width="8" height="32" rx="2" fill="#4caf50"/><rect x="42" y="16" width="8" height="32" rx="2" fill="#4caf50"/><polygon points="26,26 38,32 26,38" fill="#4caf50"/></svg>
   <h1>Auto Port Forward</h1>
 </header>
 
